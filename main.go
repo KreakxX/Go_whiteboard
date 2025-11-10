@@ -3,9 +3,19 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
 )
+
+type Session struct {
+	clients map[*websocket.Conn]bool
+	mu      sync.Mutex
+}
+
+var session = Session{
+	clients: make(map[*websocket.Conn]bool),
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -23,6 +33,16 @@ func ws_handler(w http.ResponseWriter, r *http.Request) {
 
 	defer conn.Close()
 
+	session.mu.Lock()
+	session.clients[conn] = true
+	session.mu.Unlock()
+
+	defer func() {
+		session.mu.Lock()
+		delete(session.clients, conn)
+		session.mu.Unlock()
+	}()
+
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -31,11 +51,29 @@ func ws_handler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		fmt.Println(message)
-		if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			fmt.Println("Error writing message:", err)
-			break
-		}
+		broadcast(message)
 
+		// sending message back to the client like an echo not neccessary for this type shit
+		// if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+		// 	fmt.Println("Error writing message:", err)
+		// 	break
+		// }
+
+	}
+}
+
+func broadcast(message []byte) {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+
+	for client := range session.clients {
+		err := client.WriteMessage(websocket.TextMessage, message)
+
+		if err != nil {
+			fmt.Println("Error while sending message to clients", err)
+			client.Close()
+			delete(session.clients, client)
+		}
 	}
 }
 
