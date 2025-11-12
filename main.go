@@ -49,13 +49,16 @@ func ws_handler(w http.ResponseWriter, r *http.Request) {
 		switch data["action"] {
 
 		case "create":
-			session = createNewSession()
+			session = createNewSession(data["code"], conn)
+			fmt.Println("Session Created")
 
 		case "join":
 			session = joinSession(data["code"], conn)
+			fmt.Println("Session Joined")
 
-		case "drawing":
+		default:
 			broadcast(message, data["code"])
+			fmt.Println("Drawing done")
 
 		}
 
@@ -69,9 +72,15 @@ func ws_handler(w http.ResponseWriter, r *http.Request) {
 
 func broadcast(message []byte, code string) {
 	sessionsMu.Lock()
-	defer sessionsMu.Unlock()
+	session, exists := sessions[code]
+	sessionsMu.Unlock()
 
-	var session *Session
+	if !exists || session == nil {
+		fmt.Println("No session found for code:", code)
+		return
+	}
+	sessionsMu.Lock()
+	defer sessionsMu.Unlock()
 
 	session = sessions[code]
 
@@ -86,8 +95,7 @@ func broadcast(message []byte, code string) {
 	}
 }
 
-func createNewSession() *Session {
-	code := "123456"
+func createNewSession(code string, conn *websocket.Conn) *Session {
 
 	s := &Session{
 		Code:    code,
@@ -96,6 +104,7 @@ func createNewSession() *Session {
 
 	sessionsMu.Lock()
 	sessions[code] = s
+	s.Clients[conn] = true
 	sessionsMu.Unlock()
 
 	return s

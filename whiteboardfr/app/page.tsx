@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useEffect } from "react";
+import { join } from "path";
+import { useRef, useEffect, useState } from "react";
 
 export default function DrawingBoard() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
   const wsRef = useRef<WebSocket | null>(null);
-
+  const [code, setCode] = useState<string>("12345");
   useEffect(() => {
     const connectToWebsocket = () => {
       try {
@@ -16,6 +17,7 @@ export default function DrawingBoard() {
         ws.onmessage = (event) => {
           // later on when receiving a message, draw the points etc
           const data = JSON.parse(event.data);
+          draw(data);
         };
 
         // when closing the connection try to reconnect after 3s
@@ -37,6 +39,34 @@ export default function DrawingBoard() {
     };
   }, []);
 
+  const draw = (data: any) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const { action, x, y } = data;
+
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.strokeStyle = "#000000";
+
+    switch (action) {
+      case "start":
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        break;
+      case "draw":
+        ctx.lineTo(x, y);
+        ctx.stroke();
+        break;
+      case "stop":
+        ctx.closePath();
+        break;
+    }
+  };
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -53,33 +83,55 @@ export default function DrawingBoard() {
     const startDrawing = (e: MouseEvent) => {
       isDrawing.current = true;
       const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
       ctx.beginPath();
-      ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+      ctx.moveTo(x, y);
+
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            action: "start",
+            x,
+            y,
+            code,
+          })
+        );
+      }
     };
 
     const draw = (e: MouseEvent) => {
       if (!isDrawing.current) return;
       const rect = canvas.getBoundingClientRect();
-      ctx.lineWidth = 2;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = "#000000";
-      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      ctx.lineTo(x, y);
       ctx.stroke();
 
-      if (!wsRef.current) return;
-
-      wsRef.current.send(
-        JSON.stringify({
-          action: "drawing",
-          x: e.clientX - rect.left,
-          y: e.clientY - rect.top,
-        })
-      );
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            action: "draw",
+            x,
+            y,
+            code,
+          })
+        );
+      }
     };
 
     const stopDrawing = () => {
       isDrawing.current = false;
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            action: "stop",
+            code,
+          })
+        );
+      }
     };
 
     canvas.addEventListener("mousedown", startDrawing);
@@ -97,6 +149,27 @@ export default function DrawingBoard() {
 
   const createSession = async () => {
     const code = "12345";
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          action: "create",
+          code: code,
+        })
+      );
+    }
+  };
+
+  const joinSession = async () => {
+    const code = "12345";
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          action: "join",
+          code: code,
+        })
+      );
+    }
   };
 
   const clearCanvas = () => {
@@ -123,23 +196,16 @@ export default function DrawingBoard() {
             Clear Canvas
           </button>
           <button
-            onClick={clearCanvas}
+            onClick={joinSession}
             className="px-6 py-2  mr-4 bg-zinc-900 mt-5 text-primary-foreground rounded-lg hover:opacity-90 font-medium"
           >
             Join Session
           </button>
           <button
-            onClick={clearCanvas}
+            onClick={createSession}
             className="px-6 py-2  mr-4 bg-zinc-900 mt-5 text-primary-foreground rounded-lg hover:opacity-90 font-medium"
           >
             Create Session
-          </button>
-
-          <button
-            onClick={clearCanvas}
-            className="px-6 py-2  mr-4 bg-zinc-900 mt-5 text-primary-foreground rounded-lg hover:opacity-90 font-medium"
-          >
-            Leave Session
           </button>
         </div>
       </div>
